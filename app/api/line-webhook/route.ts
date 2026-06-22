@@ -2,7 +2,7 @@ import { messagingApi, validateSignature, type WebhookEvent } from "@line/bot-sd
 import { NextResponse } from "next/server";
 
 import { getGeminiReply } from "@/lib/gemini";
-import { getFaqPromptText } from "@/lib/sheet";
+import { findFaqMatch, getFaqData } from "@/lib/sheet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,8 +22,15 @@ function getRequiredEnv(name: string): string {
 
 async function buildReplyText(userMessage: string): Promise<string> {
   try {
-    const faq = await getFaqPromptText();
-    return await getGeminiReply({ faq, question: userMessage });
+    const faq = await getFaqData();
+    const matchedFaq = findFaqMatch(userMessage, faq.items);
+
+    if (matchedFaq) {
+      console.log("[sheet] direct answer preview:", matchedFaq.answer.slice(0, 500));
+      return matchedFaq.answer;
+    }
+
+    return await getGeminiReply({ faq: faq.text, question: userMessage });
   } catch (error) {
     console.error("Failed to build reply", error);
     return DEFAULT_REPLY;

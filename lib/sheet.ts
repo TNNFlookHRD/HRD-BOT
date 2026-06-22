@@ -1,6 +1,13 @@
 type CacheEntry = {
   expiresAt: number;
+  items: FaqItem[];
   text: string;
+};
+
+export type FaqItem = {
+  answer: string;
+  category: string;
+  question: string;
 };
 
 const CACHE_TTL_MS = 60_000;
@@ -84,7 +91,7 @@ function assertLooksLikeCsv(csv: string): void {
   }
 }
 
-function csvToFaqText(csv: string): { rowCount: number; text: string } {
+function csvToFaqData(csv: string): { items: FaqItem[]; rowCount: number; text: string } {
   assertLooksLikeCsv(csv);
 
   const rows = parseCsv(csv);
@@ -121,7 +128,7 @@ function csvToFaqText(csv: string): { rowCount: number; text: string } {
     );
   }
 
-  const items = rows.slice(1).flatMap((row, index) => {
+  const items = rows.slice(1).flatMap<FaqItem>((row) => {
     const category = row[categoryIndex]?.trim() ?? "";
     const question = row[questionIndex]?.trim() ?? "";
     const answer = row[answerIndex]?.trim() ?? "";
@@ -130,14 +137,7 @@ function csvToFaqText(csv: string): { rowCount: number; text: string } {
       return [];
     }
 
-    return [
-      [
-        `FAQ ${index + 1}`,
-        `category: ${category || "-"}`,
-        `question: ${question}`,
-        `answer: ${answer}`,
-      ].join("\n"),
-    ];
+    return [{ answer, category, question }];
   });
 
   if (items.length === 0) {
@@ -148,14 +148,85 @@ function csvToFaqText(csv: string): { rowCount: number; text: string } {
 
   return {
     rowCount: items.length,
-    text: items.join("\n\n"),
+    items,
+    text: items
+      .map((item, index) =>
+        [
+          `FAQ ${index + 1}`,
+          `category: ${item.category || "-"}`,
+          `question: ${item.question}`,
+          `answer: ${item.answer}`,
+        ].join("\n"),
+      )
+      .join("\n\n"),
   };
 }
 
-export async function getFaqPromptText(): Promise<string> {
+function normalizeForMatch(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[!"#$%&'()*+,\-.:;<=>?@[\\\]^_`{|}~“”‘’ๆ]/g, "");
+}
+
+function getQuestionTerms(question: string): string[] {
+  return question
+    .split(/[,，;|/\n\r]+|หรือ/g)
+    .map((term) => term.trim())
+    .filter(Boolean);
+}
+
+export function findFaqMatch(userMessage: string, items: FaqItem[]): FaqItem | null {
+  const normalizedMessage = normalizeForMatch(userMessage);
+  if (!normalizedMessage) {
+    return null;
+  }
+
+  let bestMatch: { item: FaqItem; score: number } | null = null;
+
+  for (const item of items) {
+    const terms = [item.question, ...getQuestionTerms(item.question)];
+
+    for (const term of terms) {
+      const normalizedTerm = normalizeForMatch(term);
+      if (normalizedTerm.length < 2) {
+        continue;
+      }
+
+      const isStrongMatch =
+        normalizedMessage.includes(normalizedTerm) ||
+        normalizedTerm.includes(normalizedMessage);
+
+      if (!isStrongMatch) {
+        continue;
+      }
+
+      const score = 100 + normalizedTerm.length;
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = { item, score };
+      }
+    }
+  }
+
+  if (bestMatch) {
+    console.log("[sheet] deterministic match:", {
+      question: bestMatch.item.question,
+      score: bestMatch.score,
+    });
+    return bestMatch.item;
+  }
+
+  console.log("[sheet] deterministic match: none");
+  return null;
+}
+
+export async function getFaqData(): Promise<{ items: FaqItem[]; text: string }> {
   const now = Date.now();
   if (cache && cache.expiresAt > now) {
-    return cache.text;
+    return {
+      items: cache.items,
+      text: cache.text,
+    };
   }
 
   const sheetCsvUrl = process.env.SHEET_CSV_URL;
@@ -180,13 +251,22 @@ export async function getFaqPromptText(): Promise<string> {
   });
   console.log("[sheet] faq preview:", csv.slice(0, FAQ_PREVIEW_LENGTH));
 
-  const { rowCount, text } = csvToFaqText(csv);
+  const { items, rowCount, text } = csvToFaqData(csv);
   console.log("[sheet] faq rows:", rowCount);
 
   cache = {
     expiresAt: now + CACHE_TTL_MS,
+    items,
     text,
   };
 
-  return text;
+  return {
+    items,
+    text,
+  };
+}
+
+export async function getFaqPromptText(): Promise<string> {
+  const faq = await getFaqData();
+  return faq.text;
 }
