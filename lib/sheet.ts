@@ -60,7 +60,7 @@ function parseCsv(csv: string): string[][] {
 }
 
 function normalizeHeader(value: string): string {
-  return value.trim().toLowerCase();
+  return value.trim().toLowerCase().replace(/\s*\/\s*/g, "/");
 }
 
 function findColumnIndex(headers: string[], aliases: string[]): number {
@@ -102,7 +102,6 @@ function csvToFaqText(csv: string): { rowCount: number; text: string } {
     "question",
     "คำถาม",
     "คำถาม/คำสำคัญ",
-    "คำถาม / คำสำคัญ",
     "keyword",
     "keywords",
   ]);
