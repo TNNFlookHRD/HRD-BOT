@@ -23,9 +23,13 @@ function buildPrompt({ faq, question }: ReplyInput): string {
 
 <constraints>
 ตอบโดยใช้ข้อมูลใน <faq> เท่านั้น
+ให้พิจารณาคำถามจากความหมาย ไม่ต้องรอให้ข้อความตรงกับคำถามใน FAQ แบบตัวอักษรทุกคำ
+ถ้าคำถามสั้น เช่น “ลากิจ”, “ลาพักร้อน”, “ประกันสังคม”, “โอที” ให้ค้นหาหัวข้อหรือคำตอบที่เกี่ยวข้องใน FAQ
 ห้ามแต่งราคา เวลา สถานที่ สวัสดิการ กฎระเบียบ ขั้นตอน หรือข้อมูลบริษัทที่ไม่มีอยู่ใน FAQ
-ถ้าคำถามไม่มีข้อมูลใน FAQ ให้ตอบ default_reply เท่านั้น
-default_reply คือ:
+ถ้าพบข้อมูลที่เกี่ยวข้องใน FAQ ให้ตอบจากคำตอบใน FAQ โดยเรียบเรียงเป็นภาษาธรรมชาติ
+ถ้าไม่พบข้อมูลที่เกี่ยวข้องใน FAQ จริงๆ ให้ตอบ default_reply เท่านั้น
+
+default_reply:
 ${DEFAULT_REPLY}
 
 โทนภาษา: กึ่งทางการ กระชับ ตรงประเด็น ข้อมูลครบ
@@ -63,11 +67,9 @@ export async function getGeminiReply(input: ReplyInput): Promise<string> {
   const finishReason = candidate?.finishReason ?? "UNKNOWN";
   const usageMetadata = response.usageMetadata;
 
-  console.log("Gemini usage", {
-    finishReason,
-    thoughtsTokenCount: usageMetadata?.thoughtsTokenCount ?? 0,
-    candidatesTokenCount: usageMetadata?.candidatesTokenCount ?? 0,
-  });
+  console.log("[gemini] finishReason:", finishReason);
+  console.log("[gemini] thoughtsTokenCount:", usageMetadata?.thoughtsTokenCount ?? 0);
+  console.log("[gemini] candidatesTokenCount:", usageMetadata?.candidatesTokenCount ?? 0);
 
   if (finishReason === "MAX_TOKENS") {
     return DEFAULT_REPLY;
@@ -77,6 +79,8 @@ export async function getGeminiReply(input: ReplyInput): Promise<string> {
   if (!text) {
     return DEFAULT_REPLY;
   }
+
+  console.log("[gemini] answer preview:", text.slice(0, 500));
 
   return text;
 }

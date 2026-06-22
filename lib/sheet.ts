@@ -4,6 +4,7 @@ type CacheEntry = {
 };
 
 const CACHE_TTL_MS = 60_000;
+const FAQ_PREVIEW_LENGTH = 500;
 
 let cache: CacheEntry | null = null;
 
@@ -62,19 +63,56 @@ function normalizeHeader(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function csvToFaqText(csv: string): string {
+function findColumnIndex(headers: string[], aliases: string[]): number {
+  return headers.findIndex((header) => aliases.includes(header));
+}
+
+function assertLooksLikeCsv(csv: string): void {
+  const preview = csv.trimStart().slice(0, FAQ_PREVIEW_LENGTH);
+  const lowerPreview = preview.toLowerCase();
+
+  if (
+    lowerPreview.startsWith("<!doctype html") ||
+    lowerPreview.startsWith("<html") ||
+    lowerPreview.includes("<head") ||
+    lowerPreview.includes("<body")
+  ) {
+    console.error("[sheet] fetch returned HTML instead of CSV", {
+      preview,
+    });
+    throw new Error("SHEET_CSV_URL returned HTML instead of CSV");
+  }
+}
+
+function csvToFaqText(csv: string): { rowCount: number; text: string } {
+  assertLooksLikeCsv(csv);
+
   const rows = parseCsv(csv);
+  console.log("[sheet] parsed csv rows:", rows.length);
+
   if (rows.length < 2) {
+    console.error("[sheet] faq rows: 0");
+    console.error("[sheet] parse failed or no data rows found");
     throw new Error("FAQ sheet has no data rows");
   }
 
   const headers = rows[0].map(normalizeHeader);
-  const categoryIndex = headers.indexOf("category");
-  const questionIndex = headers.indexOf("question");
-  const answerIndex = headers.indexOf("answer");
+  const categoryIndex = findColumnIndex(headers, ["category", "หมวดหมู่"]);
+  const questionIndex = findColumnIndex(headers, ["question", "คำถาม"]);
+  const answerIndex = findColumnIndex(headers, ["answer", "คำตอบ"]);
 
   if (categoryIndex === -1 || questionIndex === -1 || answerIndex === -1) {
-    throw new Error("FAQ sheet must include category, question, answer columns");
+    console.error("[sheet] missing required columns", {
+      headers,
+      required: {
+        category: ["category", "หมวดหมู่"],
+        question: ["question", "คำถาม"],
+        answer: ["answer", "คำตอบ"],
+      },
+    });
+    throw new Error(
+      "FAQ sheet must include category, question, answer columns or Thai equivalents",
+    );
   }
 
   const items = rows.slice(1).flatMap((row, index) => {
@@ -88,19 +126,24 @@ function csvToFaqText(csv: string): string {
 
     return [
       [
-        `รายการที่ ${index + 1}`,
-        `หมวดหมู่: ${category || "-"}`,
-        `คำถาม: ${question}`,
-        `คำตอบ: ${answer}`,
+        `FAQ ${index + 1}`,
+        `category: ${category || "-"}`,
+        `question: ${question}`,
+        `answer: ${answer}`,
       ].join("\n"),
     ];
   });
 
   if (items.length === 0) {
+    console.error("[sheet] faq rows: 0");
+    console.error("[sheet] parsed rows but found no usable question and answer rows");
     throw new Error("FAQ sheet has no usable question and answer rows");
   }
 
-  return items.join("\n\n");
+  return {
+    rowCount: items.length,
+    text: items.join("\n\n"),
+  };
 }
 
 export async function getFaqPromptText(): Promise<string> {
@@ -124,7 +167,16 @@ export async function getFaqPromptText(): Promise<string> {
   }
 
   const csv = await response.text();
-  const text = csvToFaqText(csv);
+  console.log("[sheet] fetch ok", {
+    status: response.status,
+    contentType: response.headers.get("content-type") ?? "unknown",
+    bytes: csv.length,
+  });
+  console.log("[sheet] faq preview:", csv.slice(0, FAQ_PREVIEW_LENGTH));
+
+  const { rowCount, text } = csvToFaqText(csv);
+  console.log("[sheet] faq rows:", rowCount);
+
   cache = {
     expiresAt: now + CACHE_TTL_MS,
     text,

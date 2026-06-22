@@ -61,6 +61,7 @@ async function handleEvent(
     return;
   }
 
+  console.log("[line] user message:", event.message.text);
   const replyText = await withReplyTimeout(buildReplyText(event.message.text));
 
   try {
