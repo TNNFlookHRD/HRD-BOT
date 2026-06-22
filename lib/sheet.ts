@@ -97,16 +97,23 @@ function csvToFaqText(csv: string): { rowCount: number; text: string } {
   }
 
   const headers = rows[0].map(normalizeHeader);
-  const categoryIndex = findColumnIndex(headers, ["category", "หมวดหมู่"]);
-  const questionIndex = findColumnIndex(headers, ["question", "คำถาม"]);
+  const categoryIndex = findColumnIndex(headers, ["category", "หมวดหมู่", "หมวด", "ประเภท"]);
+  const questionIndex = findColumnIndex(headers, [
+    "question",
+    "คำถาม",
+    "คำถาม/คำสำคัญ",
+    "คำถาม / คำสำคัญ",
+    "keyword",
+    "keywords",
+  ]);
   const answerIndex = findColumnIndex(headers, ["answer", "คำตอบ"]);
 
   if (categoryIndex === -1 || questionIndex === -1 || answerIndex === -1) {
     console.error("[sheet] missing required columns", {
       headers,
       required: {
-        category: ["category", "หมวดหมู่"],
-        question: ["question", "คำถาม"],
+        category: ["category", "หมวดหมู่", "หมวด", "ประเภท"],
+        question: ["question", "คำถาม", "คำถาม/คำสำคัญ"],
         answer: ["answer", "คำตอบ"],
       },
     });
