@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
 const DEFAULT_REPLY =
   "ขออภัยในความไม่สะดวกด้วยนะครับ/ค่ะ ผมเป็นเพียง Bot ตอบข้อความอัตโนมัติ 🤖 และยังไม่มีการบันทึกข้อมูลในส่วนนี้ อีกสักครู่จะมี Admin หน้าตาหล่อ/สวยมาตอบในไม่ช้าครับ/ค่ะ";
 
+const GREETING_HELP_REPLY =
+  "👋 สวัสดีครับ/ค่ะ\n\nฝ่ายพัฒนาทรัพยากรบุคคล ยินดีให้คำแนะนำและตอบข้อซักถามครับ/ค่ะ 😊\n\n📌 กรุณาพิมพ์คำถามที่ต้องการสอบถามมาได้เลยครับ/ค่ะ";
+
 const REPLY_TIMEOUT_MS = 8_500;
 
 function getRequiredEnv(name: string): string {
@@ -18,6 +21,52 @@ function getRequiredEnv(name: string): string {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
+}
+
+function normalizeIncomingText(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[!！?？.。…~～\s]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function stripPoliteSuffix(text: string): string {
+  let normalized = text;
+  let changed = true;
+
+  while (changed) {
+    const next = normalized.replace(/(ครับ|ค่ะ|คะ|ฮะ|จ้า|จ๊ะ|จ๋า)$/u, "").trim();
+    changed = next !== normalized;
+    normalized = next;
+  }
+
+  return normalized;
+}
+
+function isGreetingOnly(text: string): boolean {
+  const normalized = stripPoliteSuffix(normalizeIncomingText(text));
+  const greetingOnlyTexts = new Set(["สวัสดี", "หวัดดี", "hello", "hi"]);
+
+  return greetingOnlyTexts.has(normalized);
+}
+
+function isVagueInquiryOnly(text: string): boolean {
+  const normalized = stripPoliteSuffix(normalizeIncomingText(text));
+
+  if (normalized.includes("เรื่อง") || normalized.includes("เกี่ยวกับ")) {
+    return false;
+  }
+
+  const vagueInquiryOnlyTexts = new Set([
+    "ขอสอบถามข้อมูล",
+    "ขอสอบถาม",
+    "สอบถาม",
+    "สอบถามข้อมูล",
+    "อยากสอบถาม",
+  ]);
+
+  return vagueInquiryOnlyTexts.has(normalized);
 }
 
 async function buildReplyText(userMessage: string): Promise<string> {
@@ -60,16 +109,30 @@ async function handleEvent(
   event: WebhookEvent,
   client: messagingApi.MessagingApiClient,
 ): Promise<void> {
-  if (
-    event.type !== "message" ||
-    event.message.type !== "text" ||
-    !("replyToken" in event)
-  ) {
+  if (event.type !== "message" || !("replyToken" in event)) {
     return;
   }
 
-  console.log("[line] user message:", event.message.text);
-  const replyText = await withReplyTimeout(buildReplyText(event.message.text));
+  let replyText: string | null = null;
+
+  if (event.message.type === "sticker") {
+    console.log("[line] sticker message");
+    replyText = GREETING_HELP_REPLY;
+  } else if (event.message.type === "text") {
+    const userMessage = event.message.text.trim();
+    console.log("[line] user message:", userMessage);
+
+    if (isGreetingOnly(userMessage) || isVagueInquiryOnly(userMessage)) {
+      console.log("[line] greeting/vague inquiry only");
+      replyText = GREETING_HELP_REPLY;
+    } else {
+      replyText = await withReplyTimeout(buildReplyText(userMessage));
+    }
+  }
+
+  if (!replyText) {
+    return;
+  }
 
   try {
     await client.replyMessage({
